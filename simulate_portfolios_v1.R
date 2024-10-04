@@ -1,13 +1,29 @@
 ################################################################################
 #Portfolio Management, OY
 #Tekijä: AP
+#
+#Tehty:
+#-aineiston noutaminen ja tallentaminen
+#-portfolioiden simulointi eri painojen rajoissa
+#-eri optimien hakeminen annetuista portfolioiden tuotoista ja varianssseista jne
+#-ylituotosarjan kuvailu
+#
+#WIP:
+#-optimipainojen palattaminen muiden "optimien" lisäksi (tällä hetkellä palautetaan vain pf:n tuotto, sharpe ratio ja varianssi)
+#-kuvien tallentaminen 
+#-testiainestoon benchmarkkaus (tällä hetkellä df_test:llä ei tehdä mitään!)
+################################################################################
+library(quantmod)
+library(dplyr)
+library(tidyverse)
+library(e1071)
 ################################################################################
 
 #Haetaanko data
-fetch.data <- TRUE
+fetch.data <- FALSE
 
 #Tallennettavan tiedoston nimi
-save.path <- "./five_assets_plus_tbill.csv"
+save.path <- "./five_assets_and_rf.csv"
 
 if (fetch.data) {
   #aikajänne
@@ -24,10 +40,9 @@ if (fetch.data) {
   getSymbols(stocks, src = "yahoo", from = start_date, to = end_date)
   stock_data <- do.call(merge, lapply(stocks, function(ticker) Cl(get(ticker))))
   
-  #hae riskittömät risk free
+  #hae riskittömät
   getSymbols(risk.free, src = "FRED", from = start_date, to = end_date)
   risk_free_data <- DGS3MO
-  
   
   #yhdistä tiedot
   data <- merge(stock_data, risk_free_data, all = TRUE)
@@ -40,15 +55,15 @@ if (fetch.data) {
   data$Date <- as.Date(data$Date)
   
   #datan ulottuvuudet ennen NA:n poistoa
-  cat("Dimensions before removing NA rows: ",dim(data2))
+  cat("Dimensions before removing NA rows: ",dim(data))
   
   #oista NA:t (riveittäin)
-  data2 <- data2 %>% 
+  data <- data %>% 
     filter(across(everything(),
                   ~ !is.na(.)))
   
   #datan ulottuvuudet NA:n poiston jälkeen
-  cat("Dimensions after removing NA rows: ",dim(data2))
+  cat("Dimensions after removing NA rows: ",dim(data))
   
   #kirjoita tiedostoon (älä kirjoita indeksiä)
   write.csv(data, file=save.path, row.names=FALSE)
@@ -136,10 +151,10 @@ df_test[,excess.ret.colnames] %>%
 ################################################################################
 
 
-#portfolion tuotto (w = painot, R = komponenttien odotetut tuotot)
+#portfolion tuotto (w = painot, R = komponenttien odotetut tuotot, molemmat oltava matriiseja)
 pf.ret <- function(w,R) { drop( t(w) %*% R ) }
 
-#portfolion varianssi (w = painot, C = komponenttien kovarianssi)
+#portfolion varianssi (w = painot, C = komponenttien kovarianssi, molemmat oltava matriiseja!)
 pf.var <- function(w,C) {  drop( t(w) %*% C %*% w ) }
 
 # sharpe ratio
@@ -158,7 +173,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
   #kompoenttien lkm
   N <- dim(R)[1]
   
-  #tallennetaanko myös painot?
+  #tallennetaanko painot? (nämä tietenkin tarvitaan suosituksiin/raporttiin jne, mutta testaillessa ei ole tarpeen...)
   if(save.weights == TRUE) {
     w <- matrix(0,N,mc.iters)
   } else {
@@ -182,7 +197,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
   
   while(TRUE) {
 
-    # satunnainen painovektori yksikköjakaumasta, normalisoidaan [0,1] (huom! oletetaan että kaikki rahat allokoidaan eli painojen summa = 1)
+    # vedetään satunnainen painovektori yksikköjakaumasta, normeerataan summa [0,1] välille (huom! oletetaan että kaikki rahat allokoidaan eli painojen summa = 1)
     w.try <- matrix(w.lo + (w.hi - w.lo) * runif(N), N, 1)
     w.try <- w.try/sum(w.try) #normalize
     
@@ -246,7 +261,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
       break
     }
       
-  }
+  }#WHILE-silmukka
   
   # palautetut tulokset (list-muodossa)
   list(pf.moments=pf.moments, 
@@ -257,6 +272,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
 
 # paikannetaan eri "optimit" annetusta simulaatiosta
 opt.pf <- function(res, risk.free = 0) {
+  #lisättävä: painojen/allokoinnin palauttaminen eri pisteissä (vain kun ne on tallennettu)
   
   # lasketaan sharpe ratio
   sr <- pf.sharpe(res$pf.moments$ret, risk.free, res$pf.moments$var)
@@ -270,7 +286,7 @@ opt.pf <- function(res, risk.free = 0) {
   min.var.var <- res$pf.moments$var[min.var.idx]
   min.var.ret <- res$pf.moments$ret[min.var.idx]
   min.var.sr <- sr[min.var.idx]
-  
+ 
   #maksimaalinen tuotto
   max.ret.var <- res$pf.moments$var[max.ret.idx]
   max.ret.ret <- res$pf.moments$ret[max.ret.idx]
@@ -293,11 +309,16 @@ opt.pf <- function(res, risk.free = 0) {
 }
 
 
-#portfoliokuvaaja
-plot.pf <- function(res, risk.free = 0, title=NA) {
+#portfolioiden kuvaaja
+plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA) {
   
   # esti optimit
   opt.res <- opt.pf(res, risk.free = risk.free)
+  
+  #tallenna kuva png-muodossa (kuvaa ei näy jos se tallennetaan!)
+  if(is.character(save.path)) {
+    png(file = paste(save.path,".png",sep="")) #,width=600, height=350))
+  }
 
   # näytä portfoliot
   plot(res$pf.moments$var, res$pf.moments$ret, 
@@ -313,6 +334,11 @@ plot.pf <- function(res, risk.free = 0, title=NA) {
          col=c("black", "green","red", "blue"), 
          lty=1:3, cex=0.8,
          text.font=10, bg='white')
+  
+  #tallenna kuva (...jatkuu)
+  if(is.character(save.path)) {
+    dev.off()
+  }
 }
 
 
@@ -333,5 +359,6 @@ print(res.nss$w.limits)
 print(res.ss$w.limits)
 
 # plot portfolios
-plot.pf(res.nss,title="Without SS")
-plot.pf(res.ss,title="With SS")
+plot.pf(res.nss,title="Without SS", save.path = "./pf_nss")
+plot.pf(res.ss,title="With SS", save.path = "./pf_ss")
+
