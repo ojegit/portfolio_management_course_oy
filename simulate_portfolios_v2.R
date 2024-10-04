@@ -177,7 +177,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
   if(save.weights == TRUE) {
     w <- matrix(0,N,mc.iters)
   } else {
-    w <- c()
+    w <- c() #empty
   }
   
   w.limits <- matrix(0,N,2)
@@ -245,7 +245,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
     pf.moments[iter,1] <- pf.ret.try
     pf.moments[iter,2] <- pf.var.try
     if (save.weights == TRUE) {
-      w[iter,] <- w.try
+      w[,iter] <- w.try
     }
     
     # tallennetaan painojen rajat (jos näyttää siltä ettei ole vierailtu koko määritellyllä aluella, yritä uudelleen, tarkasta rajoitteet tai lisää iteraatioiden määrää!)
@@ -288,21 +288,38 @@ opt.pf <- function(res, risk.free = 0) {
   min.var.var <- res$pf.moments$var[min.var.idx]
   min.var.ret <- res$pf.moments$ret[min.var.idx]
   min.var.sr <- sr[min.var.idx]
+  
+  is.empty.w <- (length(res$w)==0)
+  if(!is.empty.w) {
+    min.var.w <- res$w[,min.var.idx]
+  } else {
+    min.var.w <- c()
+  }
  
   #maksimaalinen tuotto
   max.ret.var <- res$pf.moments$var[max.ret.idx]
   max.ret.ret <- res$pf.moments$ret[max.ret.idx]
   max.ret.sr <- sr[max.ret.idx]
+  if(!is.empty.w) {
+    max.ret.w <- res$w[,max.ret.idx]
+  } else {
+    max.ret.w <- c()
+  }
   
   #maksimaalinen sharpe ratio
   max.sr.var <- res$pf.moments$var[max.sr.idx]
   max.sr.ret <- res$pf.moments$ret[max.sr.idx]
   max.sr.sr <- sr[max.sr.idx]
+  if(!is.empty.w) {
+    max.sr.w <- res$w[,max.sr.idx]
+  } else {
+    max.sr.w <- c()
+  }
   
   # tallennetaan optimit omiin listoihin....
-  min.var <- list(var=min.var.var, ret=min.var.ret, sr=min.var.sr, idx=min.var.idx)
-  max.ret <- list(var=max.ret.var, ret=max.ret.ret, sr=max.ret.sr, idx=max.ret.idx)
-  max.sr <- list(var=max.sr.var, ret=max.sr.ret, sr=max.sr.sr, idx=max.sr.idx)
+  min.var <- list(var=min.var.var, ret=min.var.ret, sr=min.var.sr, idx=min.var.idx, w=min.var.w)
+  max.ret <- list(var=max.ret.var, ret=max.ret.ret, sr=max.ret.sr, idx=max.ret.idx, w=max.ret.w)
+  max.sr <- list(var=max.sr.var, ret=max.sr.ret, sr=max.sr.sr, idx=max.sr.idx, w=max.sr.w)
   
   #... ja tallennetaan nämä vielä omiin listoihinsa eri optimin mukaisesti
   list(min.var = min.var, 
@@ -311,15 +328,38 @@ opt.pf <- function(res, risk.free = 0) {
 }
 
 
+#tulosta portfolion optimit
+print.pf.opt <- function(opt,title=NA) {
+  
+  row.len <- 20
+  print(rep('-',row.len))
+  print("PORTFOLIO OPTIMA")
+  print(rep('-',row.len))
+  print(paste("Minimum variance:     ", opt$min.var$var))
+  print(paste("Weights: "))
+  print(opt$min.var$w)
+  print(rep('-',row.len))
+  print(paste("Maximum return:       ", opt$max.ret$ret))
+  print(paste("Weights: "))
+  print(opt$max.ret$w)
+  print(rep('-',row.len))
+  print(paste("Maximum sharpe ratio: ", opt$max.sr$sr))
+  print(paste("Weights: "))
+  print(opt$max.sr$w)
+  print(rep('-',row.len))
+
+}
+
+
 #portfolioiden kuvaaja
-plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA) {
+plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA, png.width = 900, png.height = 600) {
   
   # esti optimit
   opt.res <- opt.pf(res, risk.free = risk.free)
   
   #tallenna kuva png-muodossa (kuvaa ei näy jos se tallennetaan!)
   if(is.character(save.path)) {
-    png(file = paste(save.path,".png",sep="")) #,width=600, height=350))
+    png(file = paste(save.path,".png",sep=""), width=png.width, height=png.height)
   }
 
   # näytä portfoliot
@@ -351,13 +391,16 @@ plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA) {
 # simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, 
 # maksimiallokaatio per komponentti on 50% ja pidetään vain portfolion
 # positiiviset tuotot
-res.nss <- simulate.pf(R,C,mc.iters = 50000, print.int=2000, w.min=0, w.max=0.5,
-                       min.pf.ret.target = 0)
+res.nss <- simulate.pf(R,C,mc.iters = 20000, print.int=2000, w.min=0, w.max=0.5,
+                       min.pf.ret.target = 0, 
+                       save.weights = TRUE)
 
 # simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
 # -50% < w < 50%, sekä ja pidetään vain portfolion positiiviset tuotot
-res.ss <- simulate.pf(R,C,mc.iters = 50000, print.int=2000, w.min=-0.5, w.max=0.5, 
-                      min.pf.ret.target = 0)
+res.ss <- simulate.pf(R,C,mc.iters = 20000, print.int=2000, w.min=-0.5, w.max=0.5, 
+                      min.pf.ret.target = 0,
+                      save.weights = TRUE)
+
 
 
 # tulosta simulaattorin panojen empiiriset rajat (jos nämä poikkeaa halutuista niin yritä uudelleen
@@ -366,8 +409,15 @@ print(res.nss$w.limits)
 print(res.ss$w.limits)
 
 # piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
-plot.pf(res.nss,title="Without Short Selling (no pfs: 50k)", save.path = "./pf_nss_v1")
-plot.pf(res.ss,title="With Short Selling (no pfs: 50k)", save.path = "./pf_ss_v1")
+plot.pf(res.nss,title="Without Short Selling (no pfs: 50k)", save.path = "./pf_nss_v2")
+plot.pf(res.ss,title="With Short Selling (no pfs: 50k)", save.path = "./pf_ss_v2")
+
+# tulosta optimit
+opt.pf.nss <- opt.pf(res.nss)
+opt.pf.ss <- opt.pf(res.ss)
+
+print.pf.opt(opt.pf.nss)
+print.pf.opt(opt.pf.ss)
 
 
 ################################################################################
