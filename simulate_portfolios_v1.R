@@ -348,11 +348,16 @@ plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA) {
 
 
 
-# simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, ja maksimipaino on 50%
-res.nss <- simulate.pf(R,C,mc.iters = 10000, print.int=1000, w.min=0, w.max=0.5)
+# simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, 
+# maksimiallokaatio per komponentti on 50% ja pidetään vain portfolion
+# positiiviset tuotot
+res.nss <- simulate.pf(R,C,mc.iters = 50000, print.int=2000, w.min=0, w.max=0.5,
+                       min.pf.ret.target = 0)
 
-# simuloidaan portfoliot kun lyhyeksi myynti on sallittu, ja painot -50% < w < 50%
-res.ss <- simulate.pf(R,C,mc.iters = 10000, print.int=1000, w.min=-0.5, w.max=0.5)
+# simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
+# -50% < w < 50%, sekä ja pidetään vain portfolion positiiviset tuotot
+res.ss <- simulate.pf(R,C,mc.iters = 50000, print.int=2000, w.min=-0.5, w.max=0.5, 
+                      min.pf.ret.target = 0)
 
 
 # tulosta simulaattorin panojen empiiriset rajat (jos nämä poikkeaa halutuista niin yritä uudelleen
@@ -361,8 +366,8 @@ print(res.nss$w.limits)
 print(res.ss$w.limits)
 
 # piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
-plot.pf(res.nss,title="Without Short Selling", save.path = "./pf_nss")
-plot.pf(res.ss,title="With Short Selling", save.path = "./pf_ss")
+plot.pf(res.nss,title="Without Short Selling (no pfs: 50k)", save.path = "./pf_nss")
+plot.pf(res.ss,title="With Short Selling (no pfs: 50k)", save.path = "./pf_ss")
 
 
 ################################################################################

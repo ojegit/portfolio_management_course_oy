@@ -1,2 +1,4 @@
 tmp
 .git
+.RData
+.Rhistory
