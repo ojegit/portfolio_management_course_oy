@@ -3,15 +3,18 @@
 #Tekijä: AP
 #
 #Tehty:
+#-korjattu: pf tuottoihin liittyen, log-tuottojen muuttaminen artimeettisiksi/yksinkertaisiksi prosentuaalisiksi tuotoiksi
 #-aineiston noutaminen ja tallentaminen
 #-portfolioiden simulointi eri painojen rajoissa
 #-eri optimien hakeminen annetuista portfolioiden tuotoista ja varianssseista jne
 #-ylituotosarjan kuvailu
+#-kuvioiden ja tulosten kirjoittaminen tiedostoon
 #
 #WIP:
 #-optimipainojen palattaminen muiden "optimien" lisäksi (tällä hetkellä palautetaan vain pf:n tuotto, sharpe ratio ja varianssi)
 #-kuvien tallentaminen 
 #-testiainestoon benchmarkkaus (tällä hetkellä df_test:llä ei tehdä mitään!)
+#-hyötyfunktiot
 ################################################################################
 library(quantmod)
 library(dplyr)
@@ -76,22 +79,34 @@ data <- read.csv(save.path, row.names = 1)
 data <- as.data.frame(data)
 
 
-# logaritmiset l. jatkuvat tuotot (prosenteiksi)
+# logaritmiset l. jatkuvat tuotot (prosentteja)
 for(i in 1:length(stocks)) { #oleta että "stocks" ts. osakkeiden nimet käsittävä muuttuja on muistissa
-  tmp <- 100*log(data[paste(stocks[i],".Close",sep="")])
-  data[paste(stocks[i],".Ret",sep="")] <- tmp - lag(tmp)
+  tmp <- data[paste(stocks[i],".Close",sep="")]
+  data[paste(stocks[i],".LogRet",sep="")] <- 100*log(tmp/(lag(tmp) + 1e-8) + 1e-8)
 }
+
+# yksinkertaiset tuotot (prosentteja)
+for(i in 1:length(stocks)) {
+  tmp <- data[paste(stocks[i],".Close",sep="")]
+  data[paste(stocks[i],".SimpleRet",sep="")] <- 100*(tmp/(lag(tmp) + 1e-8) - 1)
+}
+
 
 # poista NA:t riveittäin (ainakin ensimmäinen rivi, voi olla muitakin)
 data <- data %>% filter(across(everything(), ~ !is.na(.)))
 
-# laske ylituotot (ts vähennä riskitön)
+# laske ylituotot yksinkertaisille tuotoille (ts vähennä riskitön)
 data <- data %>%
-  mutate(across(ends_with("Ret"), ~ . - DGS3MO, .names = "{col}.Excess"))
+  mutate(across(ends_with("SimpleRet"), ~ . - DGS3MO, .names = "{col}.Excess"))
 
 # muunna aikasarake sopivaan formaattiin (ja poista rivitiedot)
 data["Date"] <- as.Date(rownames(data))
 rownames(data) <- NULL
+
+
+# tuottojen muuttaminen aritmeettinen <-> log/ln välillä
+log2simple <- function(x) { exp(x) - 1 }
+simple2log <- function(x) { log(1 + x) }
 
 ################################################################################
 
@@ -107,7 +122,7 @@ print(excess.ret.colnames)
 # no assets
 N <- length(excess.ret.colnames)
 
-# assets' expected returns
+# odotetut tuotot
 R <- matrix(apply(df_train[,excess.ret.colnames], 2, mean),N,1)
 
 # assets' covariance
@@ -151,7 +166,7 @@ df_test[,excess.ret.colnames] %>%
 ################################################################################
 
 
-# portfolion tuotto (w = painot, R = komponenttien odotetut tuotot, molemmat oltava matriiseja)
+# portfolion tuotto (w = painot, R = komponenttien odotetut tuotot (aritmeettiset), molemmat oltava matriiseja)
 pf.ret <- function(w,R) { drop( t(w) %*% R ) }
 
 # portfolion varianssi (w = painot, C = komponenttien kovarianssi, molemmat oltava matriiseja!)
@@ -329,25 +344,73 @@ opt.pf <- function(res, risk.free = 0) {
 
 
 #tulosta portfolion optimit
-print.pf.opt <- function(opt,title=NA) {
+print.pf.opt <- function(opt, title=NA, asset.names = NA, save.path = NA) {
   
-  row.len <- 20
-  print(rep('-',row.len))
-  print("PORTFOLIO OPTIMA")
-  print(rep('-',row.len))
-  print(paste("Minimum variance:     ", opt$min.var$var))
-  print(paste("Weights: "))
-  print(opt$min.var$w)
-  print(rep('-',row.len))
-  print(paste("Maximum return:       ", opt$max.ret$ret))
-  print(paste("Weights: "))
-  print(opt$max.ret$w)
-  print(rep('-',row.len))
-  print(paste("Maximum sharpe ratio: ", opt$max.sr$sr))
-  print(paste("Weights: "))
-  print(opt$max.sr$w)
-  print(rep('-',row.len))
-
+  #erottelurivin pituus
+  sep.len <- 50
+  
+  #painojen näytetyt desimaalit
+  no.dec.w <- 2
+  
+  #"optimien" näytetyt desimaalit
+  no.dec.opt <- 3
+  
+  
+  #avaa tiedosto kirjoitettavaksi
+  if (is.character(save.path)) {
+    fileConn <- file(paste(save.path,".txt",sep=""))
+  } else {
+    fileConn <- ""
+  }
+  
+  #apufunktio rivin tulostamiseen (joko ruudulle tai tiedostoon)
+  print.line <- function(..., sep="") {
+    cat(...,'\n', file=fileConn, sep=sep, append = TRUE) #rivinvaihto lisätään tässä
+  }
+  
+  
+  ### TULOSTUS ALKAA
+  
+  #otsikkorivi
+  print.line(rep('-',sep.len))
+  if (is.character(title)) {
+    print.line(title)
+  } else {
+    print.line("PORTFOLIO OPTIMA")
+  }
+  print.line(rep('-',sep.len))
+  
+  
+  #varsinaiset tulokset
+  print.line("Minimum variance:     ", round(opt$min.var$var, no.dec.opt))
+  print.line("Weights: ")
+  if (all(!is.na(asset.names))) {
+    print.line(asset.names, sep= " ")
+  }
+  print.line(round(opt$min.var$w, no.dec.w), sep="  ")
+  print.line(rep('-',sep.len), sep="")
+  print.line("Maximum return:       ", round(opt$max.ret$ret, no.dec.opt))
+  print.line("Weights: ")
+  if (all(!is.na(asset.names))) {
+    print.line(asset.names, sep="  ")
+  }
+  print.line(round(opt$max.ret$w, no.dec.w), sep="  ")
+  print.line(rep('-',sep.len))
+  print.line("Maximum sharpe ratio: ", round(opt$max.sr$sr, no.dec.opt))
+  print.line("Weights: ")
+  if (all(!is.na(asset.names))) {
+    print.line(asset.names, sep="  ")
+  }
+  print.line(round(opt$max.sr$w, no.dec.w), sep="  ")
+  print.line(rep('-',sep.len), sep="")
+  
+  ### TULOSTUS PÄÄTTYY
+  
+  
+  #sulje tiedosto
+  if (is.character(save.path)) {
+   close(fileConn)
+  }
 }
 
 
@@ -386,20 +449,21 @@ plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA, png.width = 90
 
 ################################################################################
 
+#kuinka monta portfoliota simuloidaan?
+no.pfs <- 50000
 
 
 # simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, 
-# maksimiallokaatio per komponentti on 50% ja pidetään vain portfolion
-# positiiviset tuotot
-res.nss <- simulate.pf(R,C,mc.iters = 20000, print.int=2000, w.min=0, w.max=0.5,
-                       min.pf.ret.target = 0, 
-                       save.weights = TRUE)
+# maksimiallokaatio per komponentti on 50%
+res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=2000, w.min=0, w.max=0.5,
+                       min.pf.ret.target = -Inf, 
+                       save.weights = TRUE, debug = FALSE)
 
 # simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
-# -50% < w < 50%, sekä ja pidetään vain portfolion positiiviset tuotot
-res.ss <- simulate.pf(R,C,mc.iters = 20000, print.int=2000, w.min=-0.5, w.max=0.5, 
-                      min.pf.ret.target = 0,
-                      save.weights = TRUE)
+# -50% < w < 50%
+res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=2000, w.min=-0.5, w.max=0.5, 
+                      min.pf.ret.target = -Inf,
+                      save.weights = TRUE, debug = FALSE)
 
 
 
@@ -408,16 +472,43 @@ res.ss <- simulate.pf(R,C,mc.iters = 20000, print.int=2000, w.min=-0.5, w.max=0.
 print(res.nss$w.limits)
 print(res.ss$w.limits)
 
-# piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
-plot.pf(res.nss,title="Without Short Selling (no pfs: 50k)", save.path = "./pf_nss_v2")
-plot.pf(res.ss,title="With Short Selling (no pfs: 50k)", save.path = "./pf_ss_v2")
+#tunnisteet (mm. kuva ja "optimit")
+title.nss = paste("SS DISABLED (", no.pfs," pfs)",sep="")
+title.ss = paste("SS ENABLED (", no.pfs," pfs)",sep="")
 
-# tulosta optimit
+# piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
+plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3")
+plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3")
+
+# hae "optimit"
 opt.pf.nss <- opt.pf(res.nss)
 opt.pf.ss <- opt.pf(res.ss)
 
-print.pf.opt(opt.pf.nss)
-print.pf.opt(opt.pf.ss)
+# tulosta optimit näytölle ja tallenna tiedostoon (jos 'save.path' eli tiedostonimi annetaan mitään ei tulosteta vaan se tallennetaan)
+print.pf.opt(opt.pf.nss, title=title.nss, asset.names = stocks) #, save.path = "./pf_nss_v3")
+print.pf.opt(opt.pf.ss, title=title.ss, asset.names = stocks) #, save.path = "./pf_ss_v3")
 
 
 ################################################################################
+
+#testiportfolion tuotot (w = painot, r = kompoenttien tuotot)
+pf.test <- function(w,r) {
+  D < dim(r)
+  matrix(apply(r,1,function(r){pf.ret(W,r)}), D[1], 1)
+}
+
+#tracking error (pf.ret.real = todellinen tuotto l. testiaineisto estimoiduilla painoilla, pf.ret.est = testiaineisto )
+pf.tracking.error <- function(pf.ret.real, pf.ret.est) {
+  te <- pf.ret.real - pf.ret.est
+  stdev <- sd(te)
+  list(stdev = stdev) 
+}
+
+#vertailuportfolio no 1: 1/N testiaineisto 
+
+
+#vertailuportfolio no 2: max sharpe, testiaineisto
+
+#vertailuportfolio no 3: S&P500
+
+
