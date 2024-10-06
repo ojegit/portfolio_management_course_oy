@@ -37,7 +37,7 @@ C <- matrix(cov(df_train[,excess.ret.colnames]),N,N)
 
 ## 50k pfs simulated with w.min=0, w.max=1
 
-![short selling disabled, all portfolios](./pf_nss_v3_all.png)
+![short selling disabled, efficient frontier approx](./pf_nss_v3_eff.png)
 ![short selling disabled, all portfolios](./pf_nss_v3_all.png)
 
 ```
@@ -98,7 +98,7 @@ AAPL  MSFT  GOOG  AMZN  NVDA
 
 ## 50k pfs simulated with w.min=-1, w.max=1
 ![short selling enabled, efficient frontier approx](./pf_ss_v3_eff.png)
-![short selling enabled, efficient frontier approx](./pf_ss_v3_eff.png)
+![short selling enabled, all portfolios](./pf_ss_v3_all.png)
 
 ```
 --------------------------------------------------

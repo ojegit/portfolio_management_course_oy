@@ -186,7 +186,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
                         min.pf.ret.target = -Inf, 
                         max.pf.var.target = Inf,
                         risk.free = NA,
-                        save.weights = FALSE,
+                        save.weights = TRUE,
                         print.int = 500,
                         debug = FALSE) {
   
@@ -206,12 +206,17 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
   
   
   # yksikköjakauman rajat (vrt. painojen rajat joihin näitä verrataan)
-  if (w.min > 0) {
-    w.lo <- 0
-  } else {
-    w.lo <- w.min
-  }
-  w.hi <- 1
+  #w.hi <- 1
+  # if (w.min > 0) {
+  #   w.lo <- 0
+  #   w.hi <- w.max
+  # } else {
+  #   w.lo <- w.min
+  #   w.hi <- w.max
+  # }
+  
+  w.lo <- w.min
+  w.hi <- w.max
   
   exit.flag <- 0
   iter <- 0
@@ -653,30 +658,40 @@ no.pfs <- 100000
 
 # simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, 
 # maksimiallokaatio per komponentti on 50%
-res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=0, w.max=1,
-                       min.pf.ret.target = -Inf, 
+res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=0, w.max=0.5,
+                       min.pf.ret.target = -Inf,
                        save.weights = TRUE, debug = FALSE)
 
 # simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
 # -50% < w < 50%
-res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=-1, w.max=1, 
+res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=-0.5, w.max=0.5, 
                       min.pf.ret.target = -Inf,
                       save.weights = TRUE, debug = FALSE)
 
+
+# simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
+# -200% < w < 200%
+res.ss2 <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=-2, w.max=2, 
+                      min.pf.ret.target = -Inf,
+                      save.weights = TRUE, debug = FALSE)
 
 
 # tulosta simulaattorin panojen empiiriset rajat (jos nämä poikkeaa halutuista niin yritä uudelleen
 # lisää iteraatiota jne.)
 print(res.nss$w.limits)
 print(res.ss$w.limits)
+print(res.ss2$w.limits)
 
 #tunnisteet (mm. kuva ja "optimit")
 title.nss = paste("SS DISABLED (", no.pfs," pfs)",sep="")
 title.ss = paste("SS ENABLED (", no.pfs," pfs)",sep="")
+title.ss2 = paste("SS ENABLED (", no.pfs," pfs)",sep="")
 
 # piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
 plot.pf(res.nss,title=title.nss, gamma = c(1,2,4))
 plot.pf(res.ss,title=title.ss, gamma = c(1,2,4))
+plot.pf(res.ss2,title=title.ss2, gamma = c(1,2,4))
+
 plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3_eff", gamma = c(1,2,4))
 plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3_eff", gamma = c(1,2,4))
 plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3_all", gamma = c(1,2,4), efficient.frontier.only = FALSE)
@@ -687,11 +702,12 @@ plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3_all", gamma = c(1,2,4), e
 # hae "optimit"
 opt.pf.nss <- opt.pf(res.nss, asset.names = stocks, gamma = c(1,2,4))
 opt.pf.ss <- opt.pf(res.ss, asset.names = stocks, gamma = c(1,2,4))
+opt.pf.ss2 <- opt.pf(res.ss2, asset.names = stocks, gamma = c(1,2,4))
 
 # tulosta optimit näytölle ja tallenna tiedostoon (jos 'save.path' eli tiedostonimi annetaan mitään ei tulosteta vaan se tallennetaan)
 print.pf.opt(opt.pf.nss, title=title.nss) #, save.path = "./pf_nss_v3")
 print.pf.opt(opt.pf.ss, title=title.ss) #, save.path = "./pf_ss_v3")
-
+print.pf.opt(opt.pf.ss2, title=title.ss2) #, save.path = "./pf_ss2_v3")
 
 ################################################################################
 
