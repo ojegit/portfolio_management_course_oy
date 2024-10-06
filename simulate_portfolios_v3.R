@@ -3,6 +3,7 @@
 #Tekijä: AP
 #
 #Tehty:
+#-mahdollisuus näyttää portfolioiden tehokkaan rintaman pisteet (approksimaatio), kaikkien sijaan
 #-hyötyfunktiot (quadratic, valituilla riskitasoilla)
 #-optimipainojen palattaminen muiden "optimien" lisäksi (tällä hetkellä palautetaan vain pf:n tuotto, sharpe ratio ja varianssi)
 #-korjattu: pf tuottoihin liittyen, log-tuottojen muuttaminen artimeettisiksi/yksinkertaisiksi prosentuaalisiksi tuotoiksi
@@ -565,16 +566,19 @@ print.pf.opt <- function(opt, title=NA, asset.names = NA, save.path = NA) {
 
 
 #portfolioiden kuvaaja (etsii optimit tämän sisällä eli niitä ei tarvitse erikseen syöttää)
-plot.pf <- function(res, risk.free=0, gamma = c(1), title=NA, save.path=NA, 
+plot.pf <- function(res, efficient.frontier.only = TRUE, risk.free=0, gamma = c(1), title=NA, save.path=NA, 
                     png.width=900, png.height=600) {
   
   # TBA: valitaan mitä optimeja näytetään: "min.var", "max.ret", "max.sr", "max.util"
   
   ###
-  pf.marker.size <- 0.1
-  pf.opt.marker.size <- 1.1
-  legend.marker.size <- 1.1
-  legend.text.size <- 10
+  pf.marker.size <- 0.8
+  pf.opt.marker.size <- 2.0
+  legend.marker.size <- 0.8
+  #legend.text.size <- 5
+  
+  pf.marker.fill.color <- 'black'
+  pf.opt.marker.fill.color <- 'black'
   ###
   
   
@@ -586,19 +590,28 @@ plot.pf <- function(res, risk.free=0, gamma = c(1), title=NA, save.path=NA,
     png(file = paste(save.path,".png",sep=""), width=png.width, height=png.height)
   }
 
-  # näytä kaikki portfoliot
-  plot(res$pf.moments$var, res$pf.moments$ret, 
+  # näytä portfoliot
+  if (efficient.frontier.only == TRUE) {
+    
+    #otetaan vain uloimmat pisteet huomoon, ts. ne mitkä piirtää tehokkaan rintaman
+    I <- chull(cbind(res$pf.moments$var, res$pf.moments$ret))
+    plot(res$pf.moments$var[I], res$pf.moments$ret[I], bg = pf.marker.fill.color,
+         col='black', xlab="pf.var", ylab="pf.ret", main=title, cex=pf.marker.size, pch=1)
+    
+  } else {
+    plot(res$pf.moments$var, res$pf.moments$ret, bg = pf.marker.fill.color,
        col='black', xlab="pf.var", ylab="pf.ret", main=title, cex=pf.marker.size, pch=1)
+  }
   
   # näytä eri optimit (vih: min.var, pun: max.tuotto, sin: max.sharpe, vio: max.util)
   points(opt.res$min.var$var,
          opt.res$min.var$ret,
          col='green',
-         bg='white',
+         bg=pf.opt.marker.fill.color,
          pch=2,
          cex=pf.opt.marker.size)
-  points(opt.res$max.ret$var, opt.res$max.ret$ret, col='red', bg='white', pch=3, cex=pf.opt.marker.size)
-  points(opt.res$max.sr$var, opt.res$max.sr$ret, col='blue', bg='white', pch=4, cex=pf.opt.marker.size)
+  points(opt.res$max.ret$var, opt.res$max.ret$ret, col='red', bg=pf.opt.marker.fill.color, pch=3, cex=pf.opt.marker.size)
+  points(opt.res$max.sr$var, opt.res$max.sr$ret, col='blue', bg=pf.opt.marker.fill.color, pch=4, cex=pf.opt.marker.size)
   
   ng <- length( opt.res$max.util$ret )
   if(ng > 0) {
@@ -607,7 +620,7 @@ plot.pf <- function(res, risk.free=0, gamma = c(1), title=NA, save.path=NA,
       points(opt.res$max.util$var[i,1],
              opt.res$max.util$ret[i,1], 
              col='purple', 
-             bg='white',
+             bg=pf.opt.marker.fill.color,
              pch=4+i, 
              cex=pf.opt.marker.size )  
     }
@@ -621,7 +634,7 @@ plot.pf <- function(res, risk.free=0, gamma = c(1), title=NA, save.path=NA,
          col= c( c("black", "green","red", "blue"), rep('purple',ng) ), 
          lty=1:(4+ng), 
          cex=legend.marker.size,
-         text.font=legend.text.size, 
+         text.font=NULL, 
          bg='white')
   
   #tallenna kuva (...jatkuu)
@@ -635,18 +648,18 @@ plot.pf <- function(res, risk.free=0, gamma = c(1), title=NA, save.path=NA,
 ################################################################################
 
 #kuinka monta portfoliota simuloidaan?
-no.pfs <- 10000
+no.pfs <- 100000
 
 
 # simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, 
 # maksimiallokaatio per komponentti on 50%
-res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=5000, w.min=0, w.max=1,
+res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=0, w.max=1,
                        min.pf.ret.target = -Inf, 
                        save.weights = TRUE, debug = FALSE)
 
 # simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
 # -50% < w < 50%
-res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=5000, w.min=-1, w.max=1, 
+res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=10000, w.min=-1, w.max=1, 
                       min.pf.ret.target = -Inf,
                       save.weights = TRUE, debug = FALSE)
 
@@ -664,8 +677,8 @@ title.ss = paste("SS ENABLED (", no.pfs," pfs)",sep="")
 # piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
 plot.pf(res.nss,title=title.nss, gamma = c(1,2,4))
 plot.pf(res.ss,title=title.ss, gamma = c(1,2,4))
-#plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3", gamma = c(1,2,4))
-#plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3", gamma = c(1,2,4))
+plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3", gamma = c(1,2,4))
+plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3", gamma = c(1,2,4))
 
 
 
