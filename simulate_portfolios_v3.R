@@ -3,6 +3,8 @@
 #Tekijä: AP
 #
 #Tehty:
+#-hyötyfunktiot (quadratic, valituilla riskitasoilla)
+#-optimipainojen palattaminen muiden "optimien" lisäksi (tällä hetkellä palautetaan vain pf:n tuotto, sharpe ratio ja varianssi)
 #-korjattu: pf tuottoihin liittyen, log-tuottojen muuttaminen artimeettisiksi/yksinkertaisiksi prosentuaalisiksi tuotoiksi
 #-aineiston noutaminen ja tallentaminen
 #-portfolioiden simulointi eri painojen rajoissa
@@ -11,10 +13,9 @@
 #-kuvioiden ja tulosten kirjoittaminen tiedostoon
 #
 #WIP:
-#-optimipainojen palattaminen muiden "optimien" lisäksi (tällä hetkellä palautetaan vain pf:n tuotto, sharpe ratio ja varianssi)
 #-kuvien tallentaminen 
 #-testiainestoon benchmarkkaus (tällä hetkellä df_test:llä ei tehdä mitään!)
-#-hyötyfunktiot
+
 ################################################################################
 library(quantmod)
 library(dplyr)
@@ -175,6 +176,9 @@ pf.var <- function(w,C) {  drop( t(w) %*% C %*% w ) }
 # sharpe ratio
 pf.sharpe <- function(pf.ret, risk.free, pf.var) { (pf.ret - risk.free) / sqrt(pf.var) }
 
+# portfolion hyöty (perus l. quadratic; oleta että tuotot ja varianssit on jo laskettu)
+pf.utility <- function(pf.ret,pf.var,gamma=1) { pf.ret - 0.5*gamma*sqrt(pf.var) }
+
 
 # tuottojen ja varianssin simulointi eri painojen arvoilla
 simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000, 
@@ -208,7 +212,15 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
   }
   w.hi <- 1
   
+  exit.flag <- 0
   iter <- 0
+  
+  # lopetetaan etsintä jos vähintään tämän verran hylättyjä allokaatioita peräkkäin 
+  #(ts. todennäköisyys löytää edes yksi rajoitteet läpäisevä allokaatiovektori on
+  # liian pieni, joten etsintää ei kannata jatkaa)
+  max.stuck.iters <- 1000
+  iter.stuck <- 0
+  debug.stop.time <- 0.1 #sekunteina
   
   while(TRUE) {
 
@@ -220,12 +232,21 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
     if (debug) {
       print("w.try:")
       print(w.try)
-      Sys.sleep(1)
+      Sys.sleep(debug.stop.time)
     }
     ###
     
     # tarkastetaan painojen rajoitteiden toteutuminen (oletus: [0,1])
     if ( any(w.try < w.min) || any(w.try > w.max) ) {
+      iter.stuck <- iter.stuck + 1
+      
+      ### DEBUGGAUSTA
+      if (debug) {
+        print(paste("iter.stuck: ", iter.stuck, " (rejected w)"))
+        Sys.sleep(debug.stop.time)
+      }
+      ###
+      
       next
     }
     
@@ -236,17 +257,28 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
     ### DEBUGGAUSTA
     if (debug) {
       print(paste("pf.ret.try: ",pf.ret.try, ", pf.var.try: ",pf.var.try))
-      Sys.sleep(1)
+      Sys.sleep(debug.stop.time)
     }
     ###
-    
     
     # tarkastetaan portfolion tuoton ja varianssin rajoitteiden toteutuminen (oletus: ei rajoitettu)
     if (is.na(pf.ret.try) || is.na(pf.var.try) || 
       pf.ret.try < min.pf.ret.target || pf.var.try > max.pf.var.target) {
+      iter.stuck <- iter.stuck + 1
+      
+      ### DEBUGGAUSTA
+      if (debug) {
+        print(paste("iter.stuck: ", iter.stuck, " (rejected pf.ret or pf.var)"))
+        Sys.sleep(debug.stop.time)
+      }
+      ###
+      
       next
     }
     
+    #nollataan peräkkäisten hylättyjen iteraatioiden laskuri
+    iter.stuck <- 0
+
     # tulostetaan simulaation edistyminen (print.int iteraatioiden välein)
     if ( (print.int > 0) && (iter %% print.int) == 0 ) {
       ##cat("ITER NO: ",iter,"/",mc.iters, " (", round(100*iter/mc.iters,2), " %)" )
@@ -270,9 +302,14 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
     
     # poistutaan silmukasta
     if (iter == mc.iters) {
+      exit.flag <- 1
       if (print.int > 0) {
         cat("Done!")
       }
+      break
+    } else if (iter.stuck == max.stuck.iters) {
+      exit.flag <- 2
+      cat("Max number of stuck iterations reached. Exiting...")
       break
     }
       
@@ -282,31 +319,62 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
   list(pf.moments=pf.moments, 
        w.limits=w.limits, 
        w=w)
-}
+  
+} # END simulate.pf
 
 
 # paikannetaan eri "optimit" annetusta simulaatiosta
-opt.pf <- function(res, risk.free = 0) {
-  #
-  # lisättävä: painojen/allokoinnin palauttaminen eri pisteissä (vain kun ne on tallennettu)
-  #
+opt.pf <- function(res, risk.free = 0, gamma = c(1), asset.names = NA) {
+
   
-  # lasketaan sharpe ratio
+  ###
+  
+  # lasketaan sharpe ratiot
   sr <- pf.sharpe(res$pf.moments$ret, risk.free, res$pf.moments$var)
   
-  # optimien indeksit (Suhteessa portfolion tuottoon ja varianssiin)
+  
+  #komponenttien lkm 
+  N <- dim(res$w)[1] #ulottuvuus 1: komponenttien lkm, ulottuvuus 2: simulaatioiden lkm
+  
+  # riskitasojen lkm
+  ng <- length(gamma)
+  
+  
+  # onko painomatriisi olemassa?
+  is.empty.w <- (length(res$w)==0)
+  ###
+  
+  
+  # optimien indeksit (suhteessa haluttuun tavoitefuntion arvoon)
   min.var.idx <- which.min(res$pf.moments$var)
   max.ret.idx <- which.max(res$pf.moments$ret)
   max.sr.idx <- which.max(sr)
+  if(ng > 0) {
+    max.util.idx <- matrix(0,ng,1)
+    for(i in 1:ng) {
+      # lasketaan hyötyfunktion arvot eri riskitasoille
+      pf.util <- pf.utility(res$pf.moments$ret, res$pf.moments$var, gamma=gamma[i])
+      
+      # haetaan maksimaalista hyötyä vastaava indeksi
+      max.util.idx[i,1] <- which.max(pf.util)
+    }
+
+  } else {
+    max.util.idx <- c()
+  }
   
   #minimimaalinen varianssi
   min.var.var <- res$pf.moments$var[min.var.idx]
   min.var.ret <- res$pf.moments$ret[min.var.idx]
   min.var.sr <- sr[min.var.idx]
-  
-  is.empty.w <- (length(res$w)==0)
   if(!is.empty.w) {
-    min.var.w <- res$w[,min.var.idx]
+    min.var.w <- matrix(res$w[,min.var.idx],N,1)
+    
+    #lisää komponenttien nimet painoihin
+    if (all(!is.na(asset.names))) {
+      rownames(min.var.w) <- asset.names
+    }
+    
   } else {
     min.var.w <- c()
   }
@@ -316,31 +384,87 @@ opt.pf <- function(res, risk.free = 0) {
   max.ret.ret <- res$pf.moments$ret[max.ret.idx]
   max.ret.sr <- sr[max.ret.idx]
   if(!is.empty.w) {
-    max.ret.w <- res$w[,max.ret.idx]
+    max.ret.w <- matrix(res$w[,max.ret.idx],N,1)
+    
+    #lisää komponenttien nimet painoihin
+    if (all(!is.na(asset.names))) {
+      rownames(max.ret.w) <- asset.names
+    }
+    
   } else {
     max.ret.w <- c()
   }
+  
   
   #maksimaalinen sharpe ratio
   max.sr.var <- res$pf.moments$var[max.sr.idx]
   max.sr.ret <- res$pf.moments$ret[max.sr.idx]
   max.sr.sr <- sr[max.sr.idx]
   if(!is.empty.w) {
-    max.sr.w <- res$w[,max.sr.idx]
+    max.sr.w <- matrix(res$w[,max.sr.idx],N,1)
+    
+    #lisää komponenttien nimet painoihin
+    if (all(!is.na(asset.names))) {
+      rownames(max.sr.w) <- asset.names
+    }
+    
   } else {
     max.sr.w <- c()
   }
   
-  # tallennetaan optimit omiin listoihin....
-  min.var <- list(var=min.var.var, ret=min.var.ret, sr=min.var.sr, idx=min.var.idx, w=min.var.w)
-  max.ret <- list(var=max.ret.var, ret=max.ret.ret, sr=max.ret.sr, idx=max.ret.idx, w=max.ret.w)
-  max.sr <- list(var=max.sr.var, ret=max.sr.ret, sr=max.sr.sr, idx=max.sr.idx, w=max.sr.w)
   
-  #... ja tallennetaan nämä vielä omiin listoihinsa eri optimin mukaisesti
-  list(min.var = min.var, 
-       max.ret = max.ret,
-       max.sr = max.sr)
-}
+  #maksimaalinen hyöty
+  if(ng > 0) {
+    max.util.var <- matrix(0,ng,1)
+    max.util.ret <- matrix(0,ng,1)
+    max.util.sr <- matrix(0,ng,1)
+    max.util.w <- matrix(0,N,ng)
+    
+    #haetaan maksimihyödyt eri riskitasoille
+    for(i in 1:ng) {
+      max.util.var[i,1] <- res$pf.moments$var[max.util.idx[i,1]]
+      max.util.ret[i,1] <- res$pf.moments$ret[max.util.idx[i,1]]
+      max.util.sr[i,1] <- sr[max.util.idx[i,1]]
+      if(!is.empty.w) {
+        max.util.w[,i] <- res$w[,max.util.idx[i,1]]
+      }
+      
+    }
+    
+    #lisää komponenttien nimet painoihin
+    if(!is.empty.w && all(!is.na(asset.names))) {
+      rownames(max.util.w) <- asset.names
+    }
+    
+    #lisää lopuksi rivi/sarakenimiksi riskitasot
+    rownames(max.util.idx) <- paste("gamma=",gamma,sep="")
+    rownames(max.util.var) <- paste("gamma=",gamma,sep="")
+    rownames(max.util.ret) <- paste("gamma=",gamma,sep="")
+    rownames(max.util.sr) <- paste("gamma=",gamma,sep="")
+    colnames(max.util.w) <- paste("gamma=",gamma,sep="")
+      
+  } else {
+    max.util.var <- c()
+    max.util.ret <- c()
+    max.util.sr <- c()
+    max.util.w <- c()
+  }
+
+  
+  # tallennetaan optimit omiin listoihin
+  min.var <- list(var=min.var.var, ret=min.var.ret, sr=min.var.sr, idx=min.var.idx, 
+                  w=min.var.w)
+  max.ret <- list(var=max.ret.var, ret=max.ret.ret, sr=max.ret.sr, idx=max.ret.idx,
+                  w=max.ret.w)
+  max.sr <- list(var=max.sr.var, ret=max.sr.ret, sr=max.sr.sr, idx=max.sr.idx,
+                 w=max.sr.w)
+  max.util <- list(var=max.util.var, ret=max.util.ret, sr=max.util.sr, idx=max.util.idx,
+                   w=max.util.w)
+  
+  # palautetaan tulokset
+  list(min.var = min.var, max.ret = max.ret, max.sr = max.sr, max.util = max.util)
+  
+} # END pf.opt
 
 
 #tulosta portfolion optimit
@@ -354,6 +478,11 @@ print.pf.opt <- function(opt, title=NA, asset.names = NA, save.path = NA) {
   
   #"optimien" näytetyt desimaalit
   no.dec.opt <- 3
+  
+  #komponenttien nimet
+  if (!is.character(asset.names)) {
+    asset.names <- rownames(opt$min.var$w)
+  }
   
   
   #avaa tiedosto kirjoitettavaksi
@@ -371,7 +500,7 @@ print.pf.opt <- function(opt, title=NA, asset.names = NA, save.path = NA) {
   
   ### TULOSTUS ALKAA
   
-  #otsikkorivi
+  ## otsikkorivi
   print.line(rep('-',sep.len))
   if (is.character(title)) {
     print.line(title)
@@ -381,28 +510,48 @@ print.pf.opt <- function(opt, title=NA, asset.names = NA, save.path = NA) {
   print.line(rep('-',sep.len))
   
   
-  #varsinaiset tulokset
-  print.line("Minimum variance:     ", round(opt$min.var$var, no.dec.opt))
+  ## varsinaiset tulokset
+  print.line("Minimum variance")
+  print.line("Return:       ", round(opt$min.var$ret, no.dec.opt))
+  print.line("Variance (*): ", round(opt$min.var$var, no.dec.opt))
+  print.line("Sharpe-ratio: ", round(opt$min.var$sr, no.dec.opt))
   print.line("Weights: ")
-  if (all(!is.na(asset.names))) {
-    print.line(asset.names, sep= " ")
-  }
+  if (all(!is.na(asset.names))) { print.line(asset.names, sep= "  ") }
   print.line(round(opt$min.var$w, no.dec.w), sep="  ")
   print.line(rep('-',sep.len), sep="")
-  print.line("Maximum return:       ", round(opt$max.ret$ret, no.dec.opt))
+  
+  print.line("Maximum return")
+  print.line("Return (*):   ", round(opt$max.ret$ret, no.dec.opt))
+  print.line("Variance:     ", round(opt$max.ret$var, no.dec.opt))
+  print.line("Sharpe-ratio: ", round(opt$max.ret$sr, no.dec.opt))
   print.line("Weights: ")
-  if (all(!is.na(asset.names))) {
-    print.line(asset.names, sep="  ")
-  }
+  if (all(!is.na(asset.names))) { print.line(asset.names, sep="  ") }
   print.line(round(opt$max.ret$w, no.dec.w), sep="  ")
   print.line(rep('-',sep.len))
-  print.line("Maximum sharpe ratio: ", round(opt$max.sr$sr, no.dec.opt))
+  
+  print.line("Maximum sharpe ratio")
+  print.line("Return:           ", round(opt$max.sr$ret, no.dec.opt))
+  print.line("Variance:         ", round(opt$max.sr$var, no.dec.opt))
+  print.line("Sharpe-ratio (*): ", round(opt$max.sr$sr, no.dec.opt))
   print.line("Weights: ")
-  if (all(!is.na(asset.names))) {
-    print.line(asset.names, sep="  ")
-  }
+  if (all(!is.na(asset.names))) { print.line(asset.names, sep="  ") }
   print.line(round(opt$max.sr$w, no.dec.w), sep="  ")
   print.line(rep('-',sep.len), sep="")
+  
+  ng <- length( opt$max.util$ret )
+  if (ng > 0) {
+    risk.names <- rownames(opt$max.util$ret)
+    for(i in 1:ng) {
+      print.line("Maximum utility (", risk.names[i], ")")
+      print.line("Return:           ", round(opt$max.util$ret[i,1], no.dec.opt))
+      print.line("Variance:         ", round(opt$max.util$var[i,1], no.dec.opt))
+      print.line("Sharpe-ratio:     ", round(opt$max.util$sr[i,1], no.dec.opt))
+      print.line("Weights: ")
+      if (all(!is.na(asset.names))) { print.line(asset.names, sep="  ") }
+      print.line(round(opt$max.util$w[,i], no.dec.w), sep="  ")
+      print.line(rep('-',sep.len), sep="")
+    }
+  }
   
   ### TULOSTUS PÄÄTTYY
   
@@ -411,57 +560,93 @@ print.pf.opt <- function(opt, title=NA, asset.names = NA, save.path = NA) {
   if (is.character(save.path)) {
    close(fileConn)
   }
-}
-
-
-#portfolioiden kuvaaja
-plot.pf <- function(res, risk.free = 0, title=NA, save.path = NA, png.width = 900, png.height = 600) {
   
-  # esti optimit
-  opt.res <- opt.pf(res, risk.free = risk.free)
+} # END print.pf.opt
+
+
+#portfolioiden kuvaaja (etsii optimit tämän sisällä eli niitä ei tarvitse erikseen syöttää)
+plot.pf <- function(res, risk.free=0, gamma = c(1), title=NA, save.path=NA, 
+                    png.width=900, png.height=600) {
+  
+  # TBA: valitaan mitä optimeja näytetään: "min.var", "max.ret", "max.sr", "max.util"
+  
+  ###
+  pf.marker.size <- 0.1
+  pf.opt.marker.size <- 1.1
+  legend.marker.size <- 1.1
+  legend.text.size <- 10
+  ###
+  
+  
+  # etsi optimit
+  opt.res <- opt.pf(res, risk.free=risk.free, gamma=gamma)
   
   #tallenna kuva png-muodossa (kuvaa ei näy jos se tallennetaan!)
   if(is.character(save.path)) {
     png(file = paste(save.path,".png",sep=""), width=png.width, height=png.height)
   }
 
-  # näytä portfoliot
+  # näytä kaikki portfoliot
   plot(res$pf.moments$var, res$pf.moments$ret, 
-       col='black', xlab="pf.var", ylab="pf.ret", main=title)
+       col='black', xlab="pf.var", ylab="pf.ret", main=title, cex=pf.marker.size, pch=1)
   
-  # näytä eri optimit (vihreä: min.var, pun: max.tuotto, sin: max.sharpe)
-  points(opt.res$min.var$var, opt.res$min.var$ret, col='green', pch=15)
-  points(opt.res$max.ret$var, opt.res$max.ret$ret, col='red', pch=15) 
-  points(opt.res$max.sr$var, opt.res$max.sr$ret, col='blue', pch=15)
+  # näytä eri optimit (vih: min.var, pun: max.tuotto, sin: max.sharpe, vio: max.util)
+  points(opt.res$min.var$var,
+         opt.res$min.var$ret,
+         col='green',
+         bg='white',
+         pch=2,
+         cex=pf.opt.marker.size)
+  points(opt.res$max.ret$var, opt.res$max.ret$ret, col='red', bg='white', pch=3, cex=pf.opt.marker.size)
+  points(opt.res$max.sr$var, opt.res$max.sr$ret, col='blue', bg='white', pch=4, cex=pf.opt.marker.size)
   
+  ng <- length( opt.res$max.util$ret )
+  if(ng > 0) {
+    risk.names <- rownames(opt.res$max.util$ret)
+    for(i in 1:ng) {
+      points(opt.res$max.util$var[i,1],
+             opt.res$max.util$ret[i,1], 
+             col='purple', 
+             bg='white',
+             pch=4+i, 
+             cex=pf.opt.marker.size )  
+    }
+  } else {
+    risk.names <- c()
+  }
+  
+  # näytä selitykset
   legend("bottomright",
-         legend=c("pf", "min.var", "max.ret", "max.sr"),
-         col=c("black", "green","red", "blue"), 
-         lty=1:3, cex=0.8,
-         text.font=10, bg='white')
+         legend = c( c("pf", "min.var", "max.ret", "max.sr"), risk.names ),
+         col= c( c("black", "green","red", "blue"), rep('purple',ng) ), 
+         lty=1:(4+ng), 
+         cex=legend.marker.size,
+         text.font=legend.text.size, 
+         bg='white')
   
   #tallenna kuva (...jatkuu)
   if(is.character(save.path)) {
     dev.off()
   }
-}
+  
+} # END plot.pf
 
 
 ################################################################################
 
 #kuinka monta portfoliota simuloidaan?
-no.pfs <- 50000
+no.pfs <- 10000
 
 
 # simuloidaan portfoliot kun lyhyeksi myynti ei ole sallittu, 
 # maksimiallokaatio per komponentti on 50%
-res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=2000, w.min=0, w.max=0.5,
+res.nss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=5000, w.min=0, w.max=1,
                        min.pf.ret.target = -Inf, 
                        save.weights = TRUE, debug = FALSE)
 
 # simuloidaan portfoliot kun lyhyeksi myynti on sallittu, komponenttien painot 
 # -50% < w < 50%
-res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=2000, w.min=-0.5, w.max=0.5, 
+res.ss <- simulate.pf(R,C,mc.iters = no.pfs, print.int=5000, w.min=-1, w.max=1, 
                       min.pf.ret.target = -Inf,
                       save.weights = TRUE, debug = FALSE)
 
@@ -477,16 +662,21 @@ title.nss = paste("SS DISABLED (", no.pfs," pfs)",sep="")
 title.ss = paste("SS ENABLED (", no.pfs," pfs)",sep="")
 
 # piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
-plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3")
-plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3")
+plot.pf(res.nss,title=title.nss, gamma = c(1,2,4))
+plot.pf(res.ss,title=title.ss, gamma = c(1,2,4))
+#plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3", gamma = c(1,2,4))
+#plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3", gamma = c(1,2,4))
+
+
+
 
 # hae "optimit"
-opt.pf.nss <- opt.pf(res.nss)
-opt.pf.ss <- opt.pf(res.ss)
+opt.pf.nss <- opt.pf(res.nss, asset.names = stocks, gamma = c(1,2,4))
+opt.pf.ss <- opt.pf(res.ss, asset.names = stocks, gamma = c(1,2,4))
 
 # tulosta optimit näytölle ja tallenna tiedostoon (jos 'save.path' eli tiedostonimi annetaan mitään ei tulosteta vaan se tallennetaan)
-print.pf.opt(opt.pf.nss, title=title.nss, asset.names = stocks) #, save.path = "./pf_nss_v3")
-print.pf.opt(opt.pf.ss, title=title.ss, asset.names = stocks) #, save.path = "./pf_ss_v3")
+print.pf.opt(opt.pf.nss, title=title.nss) #, save.path = "./pf_nss_v3")
+print.pf.opt(opt.pf.ss, title=title.ss) #, save.path = "./pf_ss_v3")
 
 
 ################################################################################
@@ -497,14 +687,37 @@ pf.test <- function(w,r) {
   matrix(apply(r,1,function(r){pf.ret(W,r)}), D[1], 1)
 }
 
-#tracking error (pf.ret.real = todellinen tuotto l. testiaineisto estimoiduilla painoilla, pf.ret.est = testiaineisto )
-pf.tracking.error <- function(pf.ret.real, pf.ret.est) {
-  te <- pf.ret.real - pf.ret.est
-  stdev <- sd(te)
-  list(stdev = stdev) 
+# kumulatiiviset tuotot (r on oltava [0,1] eli desimaaleina eikä prosentteina)
+cumulative.ret <- function(r) {
+  cumprod(1 + r) - 1
 }
 
-#vertailuportfolio no 1: 1/N testiaineisto 
+#tracking error (pf.ret.real = todellinen tuotto l. testiaineisto estimoiduilla painoilla, pf.ret.est = testiaineisto )
+pf.tracking.error <- function(pf.ret.real, pf.ret.est) {
+  
+  #tuottojen erotus
+  diff.ret <- pf.ret.real - pf.ret.est
+  
+  #kumulatiivisten tuottojen erotus
+  diff.cret <- cumulative.ret(pf.ret.real) - cumulative.ret(pf.ret.est)
+  
+  list(ret = sd(diff.ret), cret = sd(diff.cret))
+}
+
+#indeksi
+create.index <- function(prices,weights.type = "value") {
+  
+  
+  
+  #normalisoi indeksi alkuhetkeen
+  components <- apply(components, 1, function(x){   })
+  
+  #
+  
+}
+
+#vertailuportfolio no 1: 1/N testiaineisto
+
 
 
 #vertailuportfolio no 2: max sharpe, testiaineisto
