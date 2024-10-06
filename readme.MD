@@ -35,7 +35,7 @@ C <- matrix(cov(df_train[,excess.ret.colnames]),N,N)
 [5,] 2.213581 2.260596 2.232362 2.467930 7.039019
 ```
 
-## 50k pfs simulated with w.min=0, w.max=1
+## 100k pfs simulated with w.min=0, w.max=1
 
 ![short selling disabled, efficient frontier approx](./pf_nss_v3_eff.png)
 ![short selling disabled, all portfolios](./pf_nss_v3_all.png)
@@ -43,7 +43,7 @@ C <- matrix(cov(df_train[,excess.ret.colnames]),N,N)
 ```
 > print.pf.opt(opt.pf.nss, title=title.nss)
 --------------------------------------------------
-SS DISABLED (50000 pfs)
+SS DISABLED (100000 pfs)
 --------------------------------------------------
 Minimum variance
 Return:       -0.495
@@ -96,13 +96,13 @@ AAPL  MSFT  GOOG  AMZN  NVDA
 
 ```
 
-## 50k pfs simulated with w.min=-1, w.max=1
+## 100k pfs simulated with w.min=-1, w.max=1
 ![short selling enabled, efficient frontier approx](./pf_ss_v3_eff.png)
 ![short selling enabled, all portfolios](./pf_ss_v3_all.png)
 
 ```
 --------------------------------------------------
-SS ENABLED (50000 pfs)
+SS ENABLED (100000 pfs)
 --------------------------------------------------
 Minimum variance
 Return:       -0.495
