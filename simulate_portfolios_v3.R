@@ -677,9 +677,10 @@ title.ss = paste("SS ENABLED (", no.pfs," pfs)",sep="")
 # piirrä portfoliot tuotto-riski -akselille (jos 'save.path' eli tiedostonimi annetaan kuvaa ei näytetä vaan se tallennetaan)
 plot.pf(res.nss,title=title.nss, gamma = c(1,2,4))
 plot.pf(res.ss,title=title.ss, gamma = c(1,2,4))
-plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3", gamma = c(1,2,4))
-plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3", gamma = c(1,2,4))
-
+plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3_eff", gamma = c(1,2,4))
+plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3_eff", gamma = c(1,2,4))
+plot.pf(res.nss,title=title.nss, save.path = "./pf_nss_v3_all", gamma = c(1,2,4), efficient.frontier.only = FALSE)
+plot.pf(res.ss,title=title.ss, save.path = "./pf_ss_v3_all", gamma = c(1,2,4), efficient.frontier.only = FALSE)
 
 
 
