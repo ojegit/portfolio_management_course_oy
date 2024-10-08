@@ -41,6 +41,7 @@ if (fetch.data) {
   # riskittömien nimet (ks. FRED)
   risk.free <- c("DGS3MO") #3 kk t-bill, prosentteja
   
+  
   # hae osakkeet
   getSymbols(stocks, src = "yahoo", from = start_date, to = end_date)
   stock_data <- do.call(merge, lapply(stocks, function(ticker) Cl(get(ticker))))
@@ -48,6 +49,9 @@ if (fetch.data) {
   # hae riskittömät
   getSymbols(risk.free, src = "FRED", from = start_date, to = end_date)
   risk_free_data <- DGS3MO
+  
+  # muunnetaan yield tuotoksi
+  #test_risk_free_daily <- (1 + test_risk_free_yield)^(1/252) - 1
   
   # yhdistä tiedot
   data <- merge(stock_data, risk_free_data, all = TRUE)
@@ -242,8 +246,9 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
     }
     ###
     
-    # tarkastetaan painojen rajoitteiden toteutuminen (oletus: [0,1])
+    # tarkastetaan painojen rajoitteiden toteutuminen
     if ( any(w.try < w.min) || any(w.try > w.max) ) {
+      
       iter.stuck <- iter.stuck + 1
       
       ### DEBUGGAUSTA
@@ -252,6 +257,12 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
         Sys.sleep(debug.stop.time)
       }
       ###
+      
+      if (iter.stuck == max.stuck.iters) {
+        exit.flag <- 2
+        cat("Max number of stuck iterations reached. Exiting...")
+        break
+      }
       
       next
     }
@@ -270,6 +281,7 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
     # tarkastetaan portfolion tuoton ja varianssin rajoitteiden toteutuminen (oletus: ei rajoitettu)
     if (is.na(pf.ret.try) || is.na(pf.var.try) || 
       pf.ret.try < min.pf.ret.target || pf.var.try > max.pf.var.target) {
+      
       iter.stuck <- iter.stuck + 1
       
       ### DEBUGGAUSTA
@@ -279,8 +291,15 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
       }
       ###
       
+      if(iter.stuck == max.stuck.iters) {
+        exit.flag <- 2
+        cat("Max number of stuck iterations reached. Exiting...")
+        break
+      }
+      
       next
     }
+    
     
     #nollataan peräkkäisten hylättyjen iteraatioiden laskuri
     iter.stuck <- 0
@@ -312,10 +331,6 @@ simulate.pf <- function(R, S, w.min=0, w.max=1, mc.iters = 5000,
       if (print.int > 0) {
         cat("Done!")
       }
-      break
-    } else if (iter.stuck == max.stuck.iters) {
-      exit.flag <- 2
-      cat("Max number of stuck iterations reached. Exiting...")
       break
     }
       
