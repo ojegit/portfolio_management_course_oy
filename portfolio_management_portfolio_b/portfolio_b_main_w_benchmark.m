@@ -1,10 +1,11 @@
 
 
-%% PORTFOLIO MANAGEMENT, PORTFOLIO B
+%% PORTFOLIO MANAGEMENT, PORTFOLIO B W BENCHMARKING
 
 %%% prepare data
 start_date = "2020-09-23";
 end_date = "2024-10-04";
+
 
 %% FF5FM data (dowloaded from https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html at 'Fama/French 5 Factors (2x3) [Daily]')
 
@@ -47,42 +48,56 @@ data2 = data2(~any(ismissing(data2),2),:); %remove missing rows
 
 summary(data2)
 
+
+%% SPLIT TO TRAIN AND TEST DATA
+
+train_start_date = "2020-09-23";
+train_end_date = "2023-10-04";
+
+test_start_data = "2023-10-05";
+test_end_data = "2024-10-04";
+
+
+data_train = data2(data2.Date >= train_start_date & data2.Date <= train_end_date,:);
+data_test = data2(data2.Date >= test_start_data & data2.Date <= test_end_data,:);
+
+
 %% estimate the slopes for FF5FM
-asset_ret_names = data2.Properties.VariableNames(9:13);
+asset_ret_names = data_train.Properties.VariableNames(9:13);
 N = length(asset_ret_names);
-T = size(data2,1);
+T = size(data_train,1);
 
 beta = zeros(6, N);
-s2 = zeros(N,1); 
+s2 = zeros(N,1);
 aic = zeros(N,1);
 bic = zeros(N,1);
 ll = zeros(N,1);
-factors = [data2.Mkt_RF, data2.RMW, data2.CMA, data2.SMB, data2.HML];
+factors = [data_train.Mkt_RF, data_train.RMW, data_train.CMA, data_train.SMB, data_train.HML];
 
 for i = 1:N
    %excess returns
-   y = data2{:,asset_ret_names{i}} - data2.RF; %excess returns
+   y = data_train{:,asset_ret_names{i}} - data_train.RF; %excess returns
    X = [ones(T,1), factors];
    [beta(:,i),s2(i),aic(i),bic(i),ll(i),u] = wls(X,y,[]);
    
    %store the excess returns to the data
-   data2.([asset_ret_names{i} '_RFExcess']) = y;
-   data2.([asset_ret_names{i} '_FF5FMExcess']) = X*beta(:,i); %should one add RF back t this??
+   data_train.([asset_ret_names{i} '_RFExcess']) = y;
+   data_train.([asset_ret_names{i} '_FF5FMExcess']) = X*beta(:,i); %should one add RF back t this??
 end
 
 
 %% optimize weights (corrected AFTER presentation!)
-samp_names = data2.Properties.VariableNames(contains(data2.Properties.VariableNames,"_RFExcess"));
-Rsamp = mean(data2{:,samp_names },1)';
-%Rff5fm = mean(data2{:,samp_names },1)' + (beta')*(mean(X,1))';
+samp_names = data_train.Properties.VariableNames(contains(data_train.Properties.VariableNames,"_RFExcess"));
+Rsamp = mean(data_train{:,samp_names },1)';
+%Rff5fm = mean(data_train{:,samp_names },1)' + (beta')*(mean(X,1))';
 %Rff5fm = mean(X*beta,1)';
-Rff5fm = mean(data2{:,strrep(asset_ret_names,'_RFExcess','')},1)' + beta(2:end,:)'*mean(factors,1)';
+Rff5fm = mean(data_train{:,strrep(asset_ret_names,'_RFExcess','')},1)' + beta(2:end,:)'*mean(factors,1)';
 
-Csamp = cov(data2{:,samp_names },0);
-%Cff5fm = (beta'*cov(X))*beta + diag(cov(data2{:,samp_names },0)); %VCV, diagonal sample covariance
-%Cff5fm = (beta'*cov(X))*beta + cov(data2{:,samp_names },0); %VCV, full sample covariance
-Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + diag(diag(cov(data2{:,samp_names },0))); %VCV, diagonal sample covariance
-%Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + cov(data2{:,samp_names },0); %VCV, full sample covariance
+Csamp = cov(data_train{:,samp_names },0);
+%Cff5fm = (beta'*cov(X))*beta + diag(cov(data_train{:,samp_names },0)); %VCV, diagonal sample covariance
+%Cff5fm = (beta'*cov(X))*beta + cov(data_train{:,samp_names },0); %VCV, full sample covariance
+Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + diag(diag(cov(data_train{:,samp_names },0))); %VCV, diagonal sample covariance
+%Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + cov(data_train{:,samp_names },0); %VCV, full sample covariance
 
 disp([Rsamp, Rff5fm]);
 disp(Csamp);
@@ -106,8 +121,6 @@ pf_moments_samp = @(w)pf_moments(w, Rsamp, Csamp);
 pf_moments_ff5fm = @(w)pf_moments(w, Rff5fm, Cff5fm);
 
 %
-
-
 
 %% optimize for the sample moments
 %[pf_vars, pf_rets, w_try_range, opt] = sim_eff_front_v2(pf_moments_fun, w_lo, w_hi, min_pf_ret, max_pf_var, no_sim, gamma, rf, print_int)
@@ -188,7 +201,7 @@ disp(opt_ff5fm.min_s2_w');
 figure; 
 hold on;
 for i = 1:N
-   plot(data2{:,asset_price_names{i}}, 'Display',asset_price_names{i});
+   plot(data_train{:,asset_price_names{i}}, 'Display',asset_price_names{i});
 end
 hold off;
 legend show;
@@ -196,16 +209,16 @@ legend show;
 
 
 % cumulative returns
-all_assets = data2.Properties.VariableNames(9:15);
+all_assets = data_train.Properties.VariableNames(9:15);
 all_assets_labels = strrep(all_assets,'_SimpleRet','');
 
 
 figure; 
 hold on;
 for i = 1:length(all_assets)
-    r_ = data2{:,all_assets{i}};
+    r_ = data_train{:,all_assets{i}};
     cr_ = 100*(cumprod(1 + r_/100) - 1); %with: cumprod(1 + r) - 1
-   plot(cr_, 'DisplayName',all_assets_labels{i});
+    plot(cr_, 'DisplayName',all_assets_labels{i});
 end
 hold off;
 legend show;
@@ -213,9 +226,10 @@ legend show;
 
 %% Descriptives
 dec = 3;
+disp('Train data:');
 fprintf('%15s | %8s %8s %8s %8s %8s %8s\n', 'NAME', 'MIN', 'MAX', 'MEAN','STD','SKEW','KURT');
 for i = 1:length(all_assets)
-    tmp = data2{:,all_assets{i}};
+    tmp = data_train{:,all_assets{i}};
     fprintf('%15s | %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f\n',...
     all_assets{i},...
     min(tmp),...
@@ -229,10 +243,42 @@ end
  
 
 %asset correlations
-corr(data2(:,all_assets{1:5}))
+corr(data_train{:,all_assets(1:5)})
 
 %asset and factor correlations
 disp([all_assets(1:5),'Mkt_RF','SMB','HML','RMW','CMA'])
+corr(data_train{:,[all_assets{1:5},{'Mkt_RF','SMB','HML','RMW','CMA'}]})
+
+%
+
+disp('');
+disp('Test data:');
+fprintf('%15s | %8s %8s %8s %8s %8s %8s\n', 'NAME', 'MIN', 'MAX', 'MEAN','STD','SKEW','KURT');
+for i = 1:length(all_assets)
+    tmp = data_test{:,all_assets{i}};
+    fprintf('%15s | %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f\n',...
+    all_assets{i},...
+    min(tmp),...
+    max(tmp),...
+    mean(tmp),...
+    std(tmp),...
+    skewness(tmp),...
+    kurtosis(tmp)...
+    );
+end
+ 
+
+%asset correlations
+corr(data_test{:,all_assets(1:5)})
+
+%asset and factor correlations
+disp([all_assets(1:5),{'Mkt_RF','SMB','HML','RMW','CMA'}])
+corr(data_test{:,[all_assets{1:5},{'Mkt_RF','SMB','HML','RMW','CMA'}]})
+
+
+%% BENCHMARK 
+
+rebalance_interval = '';
 
 
 

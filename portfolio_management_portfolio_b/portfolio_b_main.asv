@@ -71,7 +71,7 @@ for i = 1:N
 end
 
 
-%% optimize weights (corrected AFTER presentation!)
+%% optimize weights
 samp_names = data2.Properties.VariableNames(contains(data2.Properties.VariableNames,"_RFExcess"));
 Rsamp = mean(data2{:,samp_names },1)';
 %Rff5fm = mean(data2{:,samp_names },1)' + (beta')*(mean(X,1))';
@@ -81,8 +81,9 @@ Rff5fm = mean(data2{:,strrep(asset_ret_names,'_RFExcess','')},1)' + beta(2:end,:
 Csamp = cov(data2{:,samp_names },0);
 %Cff5fm = (beta'*cov(X))*beta + diag(cov(data2{:,samp_names },0)); %VCV, diagonal sample covariance
 %Cff5fm = (beta'*cov(X))*beta + cov(data2{:,samp_names },0); %VCV, full sample covariance
-Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + diag(diag(cov(data2{:,samp_names },0))); %VCV, diagonal sample covariance
-%Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + cov(data2{:,samp_names },0); %VCV, full sample covariance
+%Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + diag(cov(data2{:,samp_names },0)); %VCV, diagonal sample covariance
+Cff5fm = (beta(2:end,:)'*cov(factors))*beta(2:end,:) + cov(data2{:,samp_names },0); %VCV, full sample covariance
+
 
 disp([Rsamp, Rff5fm]);
 disp(Csamp);
@@ -115,7 +116,7 @@ pf_moments_ff5fm = @(w)pf_moments(w, Rff5fm, Cff5fm);
 disp(w_try_range_samp);
 
 %%
-f_samp = figure;
+f_samp = figure; 
 hold on;
 pp = plot(pf_vars_samp, pf_rets_samp, 'xk', 'MarkerSize',1, 'DisplayName', 'pfs'); pp.Color = [0,0,0,0.1];
 plot(pf_vars_samp(opt_samp.max_sr_idx), pf_rets_samp(opt_samp.max_sr_idx), 'or', 'MarkerSize', 10, 'DisplayName', 'max sharpe');
@@ -152,7 +153,7 @@ disp(opt_samp.min_s2_w');
 disp(w_try_range_ff5fm);
 
 %%
-f_ff5fm = figure;
+f_ff5fm = figure; 
 hold on;
 pp = plot(pf_vars_ff5fm, pf_rets_ff5fm, 'xk', 'MarkerSize',1, 'DisplayName', 'pfs'); pp.Color = [0,0,0,0.1];
 plot(pf_vars_ff5fm(opt_ff5fm.max_sr_idx), pf_rets_ff5fm(opt_ff5fm.max_sr_idx), 'or', 'MarkerSize', 10, 'DisplayName', 'max sharpe');
